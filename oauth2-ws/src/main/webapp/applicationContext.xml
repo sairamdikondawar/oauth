@@ -1,61 +1,240 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-    Copyright (C) 2011 Talend Inc. - www.talend.com
--->
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:http-conf="http://cxf.apache.org/transports/http/configuration" xmlns:util="http://www.springframework.org/schema/util" xmlns:cxf="http://cxf.apache.org/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:jaxws="http://cxf.apache.org/jaxws" xmlns:jaxrs="http://cxf.apache.org/jaxrs"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+	http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd
+	http://cxf.apache.org/transports/http/configuration http://cxf.apache.org/schemas/configuration/http-conf.xsd
+	http://cxf.apache.org/jaxws http://cxf.apache.org/schemas/jaxws.xsd
+	http://cxf.apache.org/jaxrs http://cxf.apache.org/schemas/jaxrs.xsd
+	http://cxf.apache.org/core http://cxf.apache.org/schemas/core.xsd">
+	<import resource="classpath:META-INF/cxf/cxf.xml" />
+	<import resource="classpath:META-INF/cxf/cxf-extension-soap.xml" />
+	<import resource="classpath:META-INF/cxf/cxf-servlet.xml" />
 
-<!-- 
-    This is a root application context. 5 contexts are imported:
-    - socialApp.xml: Social.com application
-    - thirdPartyToSocialApp.xml: Provides an OAuth-protected access to Social.com for 3rd party clients 
-    - oauthManager.xml: OAuth server
-    - restaurantReserve.xml: Restaraunt Reservations application, a partner of Social.com
-    - restaurant.xml: Restaraunt application, a partner of Restaraunt Reservations
--->   
+	<!-- User accounts bean, used by socialApp and thirdPartyToSocialApp contexts -->
+	<bean id="userAccounts" class="oauth2.service.UserAccounts" />
+
+	<!-- CXF org.apache.cxf.rs.security.oauth2.provider.OAuthDataProvider implementation, used by request and access token services (see oauthManager context) and the request authorization service (see socialApp context) -->
+	<bean id="oauthProvider" class="oauth2.manager.OAuthManager" />
 
 
-<beans xmlns="http://www.springframework.org/schema/beans"
-      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-      xmlns:jaxrs="http://cxf.apache.org/jaxrs"
-      xmlns:cxf="http://cxf.apache.org/core"
-      xsi:schemaLocation="
-         http://www.springframework.org/schema/beans 
-         http://www.springframework.org/schema/beans/spring-beans-2.0.xsd
-         http://cxf.apache.org/core 
-         http://cxf.apache.org/schemas/core.xsd
-         http://cxf.apache.org/jaxrs
-         http://cxf.apache.org/schemas/jaxrs.xsd">
+	<!-- Social Application -->
+	<bean id="userRegistrationService" class="oauth2.service.UserRegistrationService">
+		<property name="accounts" ref="userAccounts" />
+	</bean>
 
-     <import resource="classpath:META-INF/cxf/cxf.xml" />
+	<!-- Lets registered users access and update their calendars -->
+	<bean id="socialService" class="oauth2.service.SocialService">
+		<property name="accounts" ref="userAccounts" />
+	</bean>
 
-     
-     <!-- Social Application -->
-     <import resource="socialApp.xml" />
-          
-     <!-- Third Party Access to Social Application -->
-     <import resource="thirdPartyToSocialApp.xml" />
-     
-     <!-- OAuth Manager Application -->
-     <import resource="oauthManager.xml" />
-     
-     <!-- Restaurant Reservations Application -->
-     <import resource="restaurantReserve.xml" />     
-     
-     <!-- Restaurant Application -->
-     <import resource="restaurant.xml" />
+	<!-- When Social.com user requests the Restaurant Registrations service to book a table, the latter will obtain a request token from OAuth RequestService and redirect the user to this service to get the token authorized in order to read this user's calendar. This service will return an authorization form to a user and then will redirect the user back to the Restaurant Registrations service to a callback address which was provided during the client authorization code request -->
+	<bean id="oauthAuthorizeService" class="org.apache.cxf.rs.security.oauth2.services.AuthorizationCodeGrantService">
+		<property name="dataProvider" ref="oauthProvider" />
+	</bean>
 
-     <!-- Logging settings, shared by all applications --> 
-	 <bean id="logInbound"
-	     class="org.apache.cxf.interceptor.LoggingInInterceptor" />
-	 <bean id="logOutbound"
-	     class="org.apache.cxf.interceptor.LoggingOutInterceptor" />
-	 <cxf:bus>
-	    <cxf:inInterceptors>
-	 	    <ref bean="logInbound" />
-	 	</cxf:inInterceptors>
-	 	<cxf:outInterceptors>
-	 		<ref bean="logOutbound" />
-	 	</cxf:outInterceptors>
-	 </cxf:bus>
-          
+	<!-- Security filter which enforces that only registered Social.com users can access their calendars with a public Social.com address. -->
+	<bean id="socialSecurityContext" class="oauth2.service.SecurityContextFilter">
+		<property name="accounts" ref="userAccounts" />
+	</bean>
+
+	<!-- Social.com HTML View support. RequestDispatcherProvider is configured such that it will redirect to the /forms/oauthAuthorize.jsp handler if it is asked to write OAuthAuthorizationData which is what oauthAuthorizeService relies upon in order to return an authorization form to the user. OAuthAuthorizationData will be available as the HttpServletRequest "data" attribute. It will also redirect the UserRegistration bean to "/forms/registerUserConfirm.jsp" which is a response from UserRegistrationService. This bean will be available as the HttpServletRequest "oauth.common.UserRegistration" attribute -->
+	<bean id="socialViews" class="org.apache.cxf.jaxrs.provider.RequestDispatcherProvider">
+		<property name="classResources">
+			<map>
+				<entry key="org.apache.cxf.rs.security.oauth2.common.OAuthAuthorizationData" value="/forms/oauthAuthorize.jsp" />
+				<entry key="oauth2.common.UserRegistration" value="/forms/registerUserConfirm.jsp" />
+				<entry key="oauth2.service.UserAccount" value="/forms/userAccount.jsp" />
+			</map>
+		</property>
+		<property name="beanNames">
+			<map>
+				<entry key="org.apache.cxf.rs.security.oauth2.common.OAuthAuthorizationData" value="data" />
+				<entry key="oauth2.service.UserAccount" value="account" />
+			</map>
+		</property>
+		<property name="logRedirects" value="true" />
+	</bean>
+
+	<!-- Social.com service endpoint which consists of 2 JAX-RS root resources -->
+	<jaxrs:server id="socialServer" address="/social">
+		<jaxrs:serviceBeans>
+			<ref bean="socialService" />
+			<ref bean="oauthAuthorizeService" />
+		</jaxrs:serviceBeans>
+		<jaxrs:providers>
+			<ref bean="socialSecurityContext" />
+			<ref bean="socialViews" />
+		</jaxrs:providers>
+	</jaxrs:server>
+
+	<jaxrs:server id="registerUsers" address="/register">
+		<jaxrs:serviceBeans>
+			<ref bean="userRegistrationService" />
+		</jaxrs:serviceBeans>
+		<jaxrs:providers>
+			<ref bean="socialViews" />
+		</jaxrs:providers>
+	</jaxrs:server>
+
+
+
+	<!-- Third Party Access to Social Application -->
+	<bean id="thirdPartyAccessService" class="oauth2.manager.ThirdPartyAccessService">
+		<property name="accounts" ref="userAccounts" />
+	</bean>
+
+	<bean id="oAuthFilter" class="org.apache.cxf.rs.security.oauth2.filters.OAuthRequestFilter">
+		<property name="dataProvider" ref="oauthProvider" />
+	</bean>
+
+	<!-- ThirdPartyAccessService service endpoint. Only third-party cconsumers which have valid OAuth Access tokens will be able to use it. -->
+	<jaxrs:server id="thirdPartyAccessServer" address="/thirdPartyAccess">
+		<jaxrs:serviceBeans>
+			<ref bean="thirdPartyAccessService" />
+		</jaxrs:serviceBeans>
+		<jaxrs:providers>
+			<ref bean="oAuthFilter" />
+		</jaxrs:providers>
+	</jaxrs:server>
+
+
+
+	<!-- OAuth Manager Application -->
+
+	<bean id="thirdPartyRegService" class="oauth2.manager.ThirdPartyRegistrationService">
+		<property name="dataProvider" ref="oauthProvider" />
+	</bean>
+
+	<!-- Manages the creation of access tokens, delegates to the OAuth provider to keep them -->
+	<bean id="accessTokenService" class="org.apache.cxf.rs.security.oauth2.services.AccessTokenService">
+		<property name="dataProvider" ref="oauthProvider" />
+	</bean>
+
+	<bean id="jsonProvider" class="org.apache.cxf.rs.security.oauth2.provider.OAuthJSONProvider" />
+
+	<!-- OAuthManager View Support. In this application only ThirdPartyRegistrationService relies on a view handler to return an HTML confirmation form, so it's sufficient to let RequestDispatcherProvider that whatever the response object comes its way it has to redirect it to the "/forms/registerAppConfirm.jsp" view handler and make this object (oauth2.common.ConsumerRegistration) available as HttpServletRequest 'newClient' attribute -->
+	<bean id="clientRegistrationConfirmView" class="org.apache.cxf.jaxrs.provider.RequestDispatcherProvider">
+		<property name="resourcePath" value="/forms/registerAppConfirm.jsp" />
+		<property name="beanName" value="newClient" />
+		<property name="logRedirects" value="true" />
+	</bean>
+
+	<!-- OAuthManager service endpoint, consists of 2 JAX-RS root resources -->
+	<jaxrs:server id="oauthServer" address="/oauth">
+		<jaxrs:serviceBeans>
+			<ref bean="thirdPartyRegService" />
+			<ref bean="accessTokenService" />
+		</jaxrs:serviceBeans>
+		<jaxrs:providers>
+			<ref bean="jsonProvider" />
+			<ref bean="clientRegistrationConfirmView" />
+		</jaxrs:providers>
+	</jaxrs:server>
+
+	<!-- Restaurant Reservations Application -->
+	<bean id="socialServiceClient" class="org.apache.cxf.jaxrs.client.WebClient" factory-method="create">
+		<constructor-arg type="java.lang.String" value="http://localhost:${http.port}/oauth2-ws/thirdPartyAccess/calendar" />
+	</bean>
+
+	<!-- WebClient for requesting a temporarily Access OAuth token, it is used after the authorization service (in socialApp context) redirects the user back to the callback URI. Once the access token is obtained, the service uses it to access the user's calendar -->
+
+	<bean id="atServiceClientFactory" class="org.apache.cxf.jaxrs.client.JAXRSClientFactoryBean">
+		<property name="address" value="http://localhost:${http.port}/oauth2-ws/oauth/token" />
+		<property name="headers">
+			<map>
+				<entry key="Accept" value="application/json" />
+			</map>
+		</property>
+	</bean>
+
+	<bean id="atServiceClient" factory-bean="atServiceClientFactory" factory-method="createWebClient" />
+
+	<!-- WebClient for talking to a partner Restaurant application, it is used after a user calendar's has been checked -->
+
+	<bean id="restaurantServiceClientFactory" class="org.apache.cxf.jaxrs.client.JAXRSClientFactoryBean">
+		<property name="address" value="http://localhost:${http.port}/oauth2-ws/restaurant/reception" />
+		<property name="headers">
+			<map>
+				<entry key="Content-Type" value="application/x-www-form-urlencoded" />
+				<entry key="Accept" value="text/plain" />
+			</map>
+		</property>
+	</bean>
+
+	<bean id="restaurantServiceClient" factory-bean="restaurantServiceClientFactory" factory-method="createWebClient" />
+
+	<!-- Utility OAuthClientManager which encapsulates the interaction with the OAuth Server -->
+
+	<bean id="oauthClient" class="oauth2.thirdparty.OAuthClientManager">
+		<property name="authorizationURI" value="http://localhost:${http.port}/oauth2-ws/social/authorize" />
+		<property name="accessTokenService" ref="atServiceClient" />
+	</bean>
+
+	<!-- Restaurant Reservations Service Bean -->
+	<bean id="restaurantReserveService" class="oauth2.thirdparty.RestaurantReservationService">
+		<property name="oAuthClientManager" ref="oauthClient" />
+		<property name="socialService" ref="socialServiceClient" />
+		<property name="restaurantService" ref="restaurantServiceClient" />
+	</bean>
+
+	<!-- The security filter for Restaurant Reservations -->
+	<!-- It's a primitive implementation which only recognizes a single user, to be improved... -->
+	<bean id="thirdPartySecurityContext" class="oauth2.thirdparty.SecurityContextFilter">
+		<property name="users">
+			<map>
+				<entry key="barry@restaurant.com" value="5678" />
+			</map>
+		</property>
+		<property name="realm" value="Reservations" />
+	</bean>
+
+	<!-- The Restaurant Reservations View Support Responses to requests with URIs ending with /reservations/reserve/complete and /reservations/reserve/failure will be redirected to "/forms/reservationConfirm.jsp" and "/forms/reservationFailure.jsp" respectively. In both cases the response beans (oauth.common.ReservationConfirmation and oauth.common.ReservationFailure) will be available to view handlers as HttpServletRequest "data" attribute. Note that restaurantReserveService will use JAX-RS Response.seeOther() call to redirect a user to a failure handler if a /complete reservation requests fails for whatever reasons (no authorization key is available after the authorization service redirects the user back to it, no 
+		access token can be obtained, etc) -->
+	<bean id="reserveRegistrationViews" class="org.apache.cxf.jaxrs.provider.RequestDispatcherProvider">
+		<property name="resourcePaths">
+			<map>
+				<entry key="/reservations/reserve/complete" value="/forms/reservationConfirm.jsp" />
+				<entry key="/reservations/reserve/failure" value="/forms/reservationFailure.jsp" />
+			</map>
+		</property>
+		<property name="beanName" value="data" />
+		<!-- <property name="logRedirects" value="true"/> -->
+	</bean>
+
+	<!-- Restaurant Reservations Service Endpoint -->
+	<jaxrs:server id="reservationsServer" address="/reservations">
+		<jaxrs:serviceBeans>
+			<ref bean="restaurantReserveService" />
+		</jaxrs:serviceBeans>
+		<jaxrs:providers>
+			<ref bean="thirdPartySecurityContext" />
+			<ref bean="reserveRegistrationViews" />
+		</jaxrs:providers>
+	</jaxrs:server>
+
+	<!-- Restaurant Application -->
+
+	<bean id="restaurantService" class="oauth2.thirdparty.RestaurantService" />
+
+	<!-- Basic Restaurant Service endpoint, it makes a booking if it has a free table for a specific hour and returns its address -->
+	<jaxrs:server id="restaurantServer" address="/restaurant">
+		<jaxrs:serviceBeans>
+			<ref bean="restaurantService" />
+		</jaxrs:serviceBeans>
+	</jaxrs:server>
+
+
+	<!-- Logging settings, shared by all applications -->
+	<bean id="logInbound" class="org.apache.cxf.interceptor.LoggingInInterceptor" />
+	<bean id="logOutbound" class="org.apache.cxf.interceptor.LoggingOutInterceptor" />
+	<cxf:bus>
+		<cxf:inInterceptors>
+			<ref bean="logInbound" />
+		</cxf:inInterceptors>
+		<cxf:outInterceptors>
+			<ref bean="logOutbound" />
+		</cxf:outInterceptors>
+	</cxf:bus>
+
 </beans>
 

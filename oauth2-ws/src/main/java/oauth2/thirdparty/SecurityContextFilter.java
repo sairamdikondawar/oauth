@@ -29,24 +29,22 @@ public class SecurityContextFilter implements ContainerRequestFilter {
 	private HttpHeaders headers;
 	private Map<String, String> users;
 	private String realm;
+
 	public void setUsers(Map<String, String> users) {
 		this.users = users;
-	} 
-	
-	
-	@Override
-	public void filter(ContainerRequestContext requestContext)
-			throws IOException {
-	    Message message = JAXRSUtils.getCurrentMessage();
-		
+	}
+
+	public void filter(ContainerRequestContext requestContext) throws IOException {
+		Message message = JAXRSUtils.getCurrentMessage();
+
 		SecurityContext sc = message.get(SecurityContext.class);
 		if (sc != null) {
-		    Principal principal  = sc.getUserPrincipal();
-		    if (principal != null && users.containsKey(principal.getName())) {
-			    return;
-		    }
+			Principal principal = sc.getUserPrincipal();
+			if (principal != null && users.containsKey(principal.getName())) {
+				return;
+			}
 		}
-		
+
 		List<String> authValues = headers.getRequestHeader("Authorization");
 		if (authValues.size() != 1) {
 			requestContext.abortWith(createFaultResponse());
@@ -57,7 +55,7 @@ public class SecurityContextFilter implements ContainerRequestFilter {
 			requestContext.abortWith(createFaultResponse());
 			return;
 		}
-		
+
 		String decodedValue = null;
 		try {
 			decodedValue = new String(Base64Utility.decode(values[1]));
@@ -70,7 +68,7 @@ public class SecurityContextFilter implements ContainerRequestFilter {
 			requestContext.abortWith(createFaultResponse());
 			return;
 		}
-		String password = users.get(namePassword[0]); 
+		String password = users.get(namePassword[0]);
 		if (password == null || !password.equals(namePassword[1])) {
 			requestContext.abortWith(createFaultResponse());
 			return;
@@ -84,21 +82,18 @@ public class SecurityContextFilter implements ContainerRequestFilter {
 			public boolean isUserInRole(String arg0) {
 				return false;
 			}
-			
+
 		};
 		message.put(SecurityContext.class, newSc);
 	}
 
 	private Response createFaultResponse() {
-		return Response.status(401).header("WWW-Authenticate", 
-				"Basic realm=\"" + getRealm() + "\"").build();
+		return Response.status(401).header("WWW-Authenticate", "Basic realm=\"" + getRealm() + "\"").build();
 	}
-
 
 	public String getRealm() {
 		return realm;
 	}
-
 
 	public void setRealm(String realm) {
 		this.realm = realm;

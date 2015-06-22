@@ -26,37 +26,35 @@ public class SecurityContextFilter implements ContainerRequestFilter {
 
 	@Context
 	private HttpHeaders headers;
-	
-    private UserAccounts accounts;
-	
+
+	private UserAccounts accounts;
+
 	public void setAccounts(UserAccounts accounts) {
 		this.accounts = accounts;
 	}
 
-	@Override
-	public void filter(ContainerRequestContext requestContext)
-			throws IOException {
-	    Message message = JAXRSUtils.getCurrentMessage();
-		
+	public void filter(ContainerRequestContext requestContext) throws IOException {
+		Message message = JAXRSUtils.getCurrentMessage();
+
 		SecurityContext sc = message.get(SecurityContext.class);
 		if (sc != null) {
-		    Principal principal  = sc.getUserPrincipal();
-		    if (principal != null) {
-			    String accountName = principal.getName();
-			    
-			    UserAccount account = accounts.getAccount(accountName);
-			    if (account == null) {
-			    	account = accounts.getAccountWithAlias(accountName);
-			    }
+			Principal principal = sc.getUserPrincipal();
+			if (principal != null) {
+				String accountName = principal.getName();
+
+				UserAccount account = accounts.getAccount(accountName);
+				if (account == null) {
+					account = accounts.getAccountWithAlias(accountName);
+				}
 				if (account == null) {
 					requestContext.abortWith(createFaultResponse());
 				} else {
 					setNewSecurityContext(message, account.getName());
 				}
 				return;
-		    }
+			}
 		}
-		
+
 		List<String> authValues = headers.getRequestHeader("Authorization");
 		if (authValues.size() != 1) {
 			requestContext.abortWith(createFaultResponse());
@@ -67,7 +65,7 @@ public class SecurityContextFilter implements ContainerRequestFilter {
 			requestContext.abortWith(createFaultResponse());
 			return;
 		}
-		
+
 		String decodedValue = null;
 		try {
 			decodedValue = new String(Base64Utility.decode(values[1]));
@@ -85,7 +83,7 @@ public class SecurityContextFilter implements ContainerRequestFilter {
 			requestContext.abortWith(createFaultResponse());
 			return;
 		}
-		
+
 		setNewSecurityContext(message, account.getName());
 	}
 
@@ -99,13 +97,13 @@ public class SecurityContextFilter implements ContainerRequestFilter {
 			public boolean isUserInRole(String arg0) {
 				return false;
 			}
-			
+
 		};
 		message.put(SecurityContext.class, newSc);
 	}
-	
+
 	private Response createFaultResponse() {
 		return Response.status(401).header("WWW-Authenticate", "Basic realm=\"Social.com\"").build();
 	}
-	
+
 }

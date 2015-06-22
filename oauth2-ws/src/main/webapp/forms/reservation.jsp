@@ -16,7 +16,7 @@
 <em></em>
 <p>
  <table>
-     <form action="/examples/reservations/reserve/table" method="POST">
+     <form action="/oauth2-ws/reservations/reserve/table" method="POST">
         <tr>
             <td><big><big><big>Customer Name:</big></big></big></td>
             <td>
